@@ -10,7 +10,7 @@ class Config:
     MODEL_VERSION_TECHANAL_AGENT: str = "anthropic:claude-sonnet-4-5"
 
     # Exchanges set up
-    EXCHANGES: list[str] = ["Bybit"]
+    EXCHANGES: list[str] = ["Binance"]
     COINS: list[str] = ["BTCUSDT"]
     SAMPLING_FREQ: str = "15Min"  # freq of the graph
 

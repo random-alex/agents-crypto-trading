@@ -6,6 +6,7 @@
 # C extensions
 *.so
 
+logs/**
 .vscode
 # Distribution / packaging
 .Python

@@ -2,8 +2,8 @@ import logfire
 from pydantic_ai import Agent
 from pydantic_ai.mcp import MCPServerStdio
 from pydantic_ai.builtin_tools import WebSearchTool
-from src.prompts.analysts import SYSTEM_PROMPT_NEWS_ANALYST
-from config import Config
+from src.agents.analysts.prompts import SYSTEM_PROMPT_NEWS_ANALYST
+from src.config import Config
 
 
 logfire.configure(service_name="News agent")
