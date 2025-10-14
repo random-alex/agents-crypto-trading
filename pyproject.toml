@@ -9,7 +9,8 @@ dependencies = [
     "httpx-auth>=0.23.1",
     "mplfinance>=0.12.10b0",
     "pandas>=2.3.3",
+    "pandas-ta>=0.4.71b0",
+    "pybit>=5.12.0",
     "pydantic-ai>=1.0.16",
     "ta-lib>=0.6.7",
-    "tiingo>=0.16.1",
 ]

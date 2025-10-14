@@ -1,54 +1,66 @@
 from dotenv import load_dotenv
-from tiingo import TiingoClient
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import pandas as pd
 from src.config import Config
 import mplfinance as mpf
 import matplotlib.pyplot as plt
 from pathlib import Path
+from pybit.unified_trading import HTTP
 
 load_dotenv()
-tiingo_config = {}
 
-# To reuse the same HTTP Session across API calls (and have better performance), include a session key.
-tiingo_config["session"] = True
-client = TiingoClient(tiingo_config)
+bybit_client = HTTP(
+    api_key=Config.BYBIT_DEMO_API_KEY,
+    api_secret=Config.BYBIT_DEMO_API_SECRET,
+    testnet=False,
+)
 
 
 def get_coin_prices(
-    start_date: str | None = None,
-    end_date: str | None = None,
+    start_date: int | None = None,
+    end_date: int | None = None,
     sampling_freq: str = Config.SAMPLING_FREQ,
 ):
     if not start_date:
-        start_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        start_date = int(
+            (datetime.now(timezone.utc) - timedelta(days=1)).timestamp() * 1000
+        )
     if not end_date:
-        end_date = datetime.now().strftime("%Y-%m-%d")
+        end_date = int(datetime.now(timezone.utc).timestamp() * 1000)
 
-    res = client.get_crypto_price_history(
-        tickers=Config.COINS,
-        exchanges=Config.EXCHANGES,
-        resampleFreq=sampling_freq,
-        startDate=start_date,
-        endDate=end_date,
+    res = bybit_client.get_kline(
+        symbol=Config.COIN,
+        interval=sampling_freq,
+        category=Config.CATEGORY,
+        limit=1000,
+        start=start_date,
+        end=end_date,
     )
-    df_ohlcv = pd.DataFrame(res[0]["priceData"])
-    df_ohlcv["date"] = pd.to_datetime(df_ohlcv["date"])
-    df_ohlcv.set_index(df_ohlcv["date"], inplace=True)
-    return df_ohlcv
+
+    df = pd.DataFrame(
+        res["result"]["list"],
+        columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"],
+    )
+    df["timestamp"] = pd.to_datetime(df["timestamp"].astype(int), unit="ms")
+    for col in ["open", "high", "low", "close", "volume", "turnover"]:
+        df[col] = pd.to_numeric(df[col])
+    df = df.sort_values("timestamp")
+    df.set_index(df["timestamp"], inplace=True)
+    df = df.drop(columns=["timestamp"])
+    return df
 
 
 def get_plot_and_save_ohlc(
     filepath: Path,
     figsize=(16, 14),
-    start_date: str | None = None,
-    end_date: str | None = None,
+    start_date: int | None = None,
+    end_date: int | None = None,
     sampling_freq: str = Config.SAMPLING_FREQ,
 ):
     df = get_coin_prices(
         start_date=start_date, end_date=end_date, sampling_freq=sampling_freq
     )
-
+    df.to_csv(filepath.with_suffix(".csv"))
     # Candlestick with volume
     fig, axes = mpf.plot(
         df,
@@ -58,7 +70,7 @@ def get_plot_and_save_ohlc(
         figsize=figsize,
         returnfig=True,
         tight_layout=False,
-        title=f"Candle plot for {Config.COINS[0]} for {sampling_freq} freq.",
+        title=f"Candle plot for {Config.COIN} for {sampling_freq} freq.",
     )
     plt.savefig(filepath, dpi=300, bbox_inches="tight")
     plt.close()
