@@ -1,19 +1,20 @@
-from typing import Dict, List
+from typing import Dict, Hashable, Any
 import pandas as pd
 import pandas_ta as ta
+from pydantic_ai import RunContext
+from src.agents.analysts.models import AgentsDeps
 
 
-def get_dataframe() -> pd.DataFrame:
+def get_dataframe(ctx: RunContext[AgentsDeps]) -> pd.DataFrame:
     """Load OHLC candlestick data with columns: open, high, low, close, volume"""
-    # TODO(@alex): make the path configurable
-    df = pd.read_csv("logs/pics/btc_tmp.csv", parse_dates=True, index_col="timestamp")
+    df = pd.read_csv(ctx.deps.df_candle_path, parse_dates=True, index_col="timestamp")
     return df
 
 
 # --- MOMENTUM INDICATORS ---
 
 
-def calculate_rsi(length: int = 14) -> List[float]:
+def calculate_rsi(ctx: RunContext[AgentsDeps], length: int = 14) -> dict[str, Hashable]:
     """
     Calculate RSI (Relative Strength Index) momentum oscillator.
 
@@ -24,124 +25,38 @@ def calculate_rsi(length: int = 14) -> List[float]:
         length: Lookback period for calculation. Default 14. Common values: 7, 14, 21
 
     Returns:
-        List of RSI values
+        Structured dictionary containing:
+        - statistics: Statistical summary (min, max, mean, std, current_value)
+        - raw_values: Complete list of RSI values
     """
-    df = get_dataframe()
-    result = ta.rsi(close=df["close"], length=length)
-    return result.tolist()
-
-
-def calculate_williams_r(length: int = 14) -> List[float]:
-    """
-    Calculate Williams %R momentum indicator.
-
-    Measures overbought/oversold levels. Values above -20 indicate overbought,
-    below -80 indicate oversold. Similar to Stochastic but more sensitive.
-
-    Args:
-        length: Lookback period. Default 14. Common values: 14, 21
-
-    Returns:
-        List of Williams %R values (range: -100 to 0)
-    """
-    df = get_dataframe()
-    result = ta.willr(high=df["high"], low=df["low"], close=df["close"], length=length)
-    return result.tolist()
-
-
-def calculate_cci(length: int = 20) -> List[float]:
-    """
-    Calculate CCI (Commodity Channel Index) momentum oscillator.
-
-    Measures deviation from average price. Values above +100 indicate overbought,
-    below -100 indicate oversold. Good for identifying cyclical trends.
-
-    Args:
-        length: Lookback period. Default 20
-
-    Returns:
-        List of CCI values
-    """
-    df = get_dataframe()
-    result = ta.cci(high=df["high"], low=df["low"], close=df["close"], length=length)
-    return result.tolist()
-
-
-def calculate_roc(length: int = 12) -> List[float]:
-    """
-    Calculate ROC (Rate of Change) momentum indicator.
-
-    Measures percentage price change over time. Positive values indicate upward
-    momentum, negative values indicate downward momentum.
-
-    Args:
-        length: Lookback period. Default 12. Common values: 9, 12, 25
-
-    Returns:
-        List of ROC percentage values
-    """
-    df = get_dataframe()
-    result = ta.roc(close=df["close"], length=length)
-    return result.tolist()
-
-
-def calculate_mfi(length: int = 14) -> List[float]:
-    """
-    Calculate MFI (Money Flow Index) volume-weighted momentum indicator.
-
-    RSI that incorporates volume. Values above 80 indicate overbought,
-    below 20 indicate oversold. Better than RSI for volume-driven markets.
-
-    Args:
-        length: Lookback period. Default 14
-
-    Returns:
-        List of MFI values (range: 0-100)
-    """
-    df = get_dataframe()
-    result = ta.mfi(
-        high=df["high"],
-        low=df["low"],
-        close=df["close"],
-        volume=df["volume"],
-        length=length,
-    )
-    return result.tolist()
-
-
-def calculate_stoch_rsi(
-    length: int = 14, rsi_length: int = 14, k: int = 3, d: int = 3
-) -> Dict[str, List[float]]:
-    """
-    Calculate Stochastic RSI oscillator.
-
-    Applies Stochastic formula to RSI. More sensitive than regular Stochastic.
-    Values above 0.8 indicate overbought, below 0.2 indicate oversold.
-
-    Args:
-        length: Stochastic period. Default 14
-        rsi_length: RSI period. Default 14
-        k: %K smoothing period. Default 3
-        d: %D smoothing period. Default 3
-
-    Returns:
-        Dict with 'k' and 'd' keys containing lists of StochRSI %K and %D values
-    """
-    df = get_dataframe()
-    result = ta.stochrsi(
-        close=df["close"], length=length, rsi_length=rsi_length, k=k, d=d
-    )
-
-    # Convert DataFrame to dict of lists
-    return {
-        "k": result[f"STOCHRSIk_{rsi_length}_{length}_{k}_{d}"].tolist(),
-        "d": result[f"STOCHRSId_{rsi_length}_{length}_{k}_{d}"].tolist(),
+    df = get_dataframe(ctx=ctx)
+    result = ta.rsi(close=df["close"], length=length).dropna().round(2)
+    rsi_values = result.tolist()
+    valid_rsi = [v for v in rsi_values if not (isinstance(v, float) and v != v)]
+    # Calculate statistics
+    current_rsi = valid_rsi[-1]
+    statistics = {
+        "current": round(current_rsi, 2),
+        "min": round(min(valid_rsi), 2),
+        "max": round(max(valid_rsi), 2),
+        "mean": round(sum(valid_rsi) / len(valid_rsi), 2),
+        "std": round(
+            (
+                sum((x - sum(valid_rsi) / len(valid_rsi)) ** 2 for x in valid_rsi)
+                / len(valid_rsi)
+            )
+            ** 0.5,
+            2,
+        ),
     }
+    result.index = result.index.astype(str)
+    output = {"overall_stats": statistics, "raw_values": result.to_dict()}
+    return output
 
 
 def calculate_stochastic(
-    k: int = 14, d: int = 3, smooth_k: int = 3
-) -> Dict[str, List[float]]:
+    ctx: RunContext[AgentsDeps], k: int = 14, d: int = 3, smooth_k: int = 3
+) -> Dict[Hashable, Any]:
     """
     Calculate Stochastic Oscillator momentum indicator.
 
@@ -154,25 +69,33 @@ def calculate_stochastic(
         smooth_k: Smoothing period for %K. Default 3
 
     Returns:
-        Dict with 'k' and 'd' keys containing lists of Stochastic %K and %D values
+        Dict with STOCHk_{k}_{d}_{smooth_k} and STOCHd_{k}_{d}_{smooth_k} keys containing lists of Stochastic %K and %D values and corresponding datetimes
     """
-    df = get_dataframe()
-    result = ta.stoch(
-        high=df["high"], low=df["low"], close=df["close"], k=k, d=d, smooth_k=smooth_k
+    df = get_dataframe(ctx=ctx)
+    result = (
+        ta.stoch(
+            high=df["high"],
+            low=df["low"],
+            close=df["close"],
+            k=k,
+            d=d,
+            smooth_k=smooth_k,
+        )
+        .dropna()
+        .round(2)
     )
-
-    return {
-        "k": result[f"STOCHk_{k}_{d}_{smooth_k}"].tolist(),
-        "d": result[f"STOCHd_{k}_{d}_{smooth_k}"].tolist(),
-    }
+    result.index = result.index.astype(str)
+    return result[
+        [f"STOCHk_{k}_{d}_{smooth_k}", f"STOCHd_{k}_{d}_{smooth_k}"]
+    ].to_dict()
 
 
 # --- TREND INDICATORS ---
 
 
 def calculate_macd(
-    fast: int = 12, slow: int = 26, signal: int = 9
-) -> Dict[str, List[float]]:
+    ctx: RunContext[AgentsDeps], fast: int = 12, slow: int = 26, signal: int = 9
+) -> Dict[str, dict[Any, Any]]:
     """
     Calculate MACD (Moving Average Convergence Divergence) trend indicator.
 
@@ -185,19 +108,23 @@ def calculate_macd(
         signal: Signal line EMA period. Default 9
 
     Returns:
-        Dict with 'macd', 'signal', and 'histogram' keys containing lists of values
+        Dict with 'macd', 'signal', and 'histogram' keys containing pairs of values and corresponding datetimes
     """
-    df = get_dataframe()
-    result = ta.macd(close=df["close"], fast=fast, slow=slow, signal=signal)
-
+    df = get_dataframe(ctx=ctx)
+    result = (
+        ta.macd(close=df["close"], fast=fast, slow=slow, signal=signal)
+        .dropna()
+        .round(2)
+    )
+    result.index = result.index.astype(str)
     return {
-        "macd": result[f"MACD_{fast}_{slow}_{signal}"].tolist(),
-        "signal": result[f"MACDs_{fast}_{slow}_{signal}"].tolist(),
-        "histogram": result[f"MACDh_{fast}_{slow}_{signal}"].tolist(),
+        "macd": result[f"MACD_{fast}_{slow}_{signal}"].to_dict(),
+        "signal": result[f"MACDs_{fast}_{slow}_{signal}"].to_dict(),
+        "histogram": result[f"MACDh_{fast}_{slow}_{signal}"].to_dict(),
     }
 
 
-def calculate_ema(length: int = 20) -> List[float]:
+def calculate_ema(ctx: RunContext[AgentsDeps], length: int = 20) -> dict[Hashable, Any]:
     """
     Calculate EMA (Exponential Moving Average).
 
@@ -208,34 +135,17 @@ def calculate_ema(length: int = 20) -> List[float]:
         length: EMA period. Default 20. Common values: 9, 20, 50, 200
 
     Returns:
-        List of EMA values
+        Dict with pairs of EMA values and corresponding datetime
     """
-    df = get_dataframe()
-    result = ta.ema(close=df["close"], length=length)
-    return result.tolist()
-
-
-def calculate_sma(length: int = 20) -> List[float]:
-    """
-    Calculate SMA (Simple Moving Average).
-
-    Arithmetic mean of prices over specified period.
-    Used to smooth price data and identify trend direction.
-
-    Args:
-        length: SMA period. Default 20. Common values: 10, 20, 50, 100, 200
-
-    Returns:
-        List of SMA values
-    """
-    df = get_dataframe()
-    result = ta.sma(close=df["close"], length=length)
-    return result.tolist()
+    df = get_dataframe(ctx=ctx)
+    result = ta.ema(close=df["close"], length=length).dropna().round(2)
+    result.index = result.index.astype(str)
+    return result.to_dict()
 
 
 def calculate_supertrend(
-    length: int = 10, multiplier: float = 3.0
-) -> Dict[str, List[float]]:
+    ctx: RunContext[AgentsDeps], length: int = 10, multiplier: float = 3.0
+) -> Dict[Hashable, Any]:
     """
     Calculate Supertrend indicator for trend following.
 
@@ -247,139 +157,35 @@ def calculate_supertrend(
         multiplier: ATR multiplier. Default 3.0. Common values: 2.0-4.0
 
     Returns:
-        Dict with 'trend', 'direction', 'long', and 'short' keys
+        Dict with 'trend', 'direction', 'long', and 'short' keys containing corresponding pairs of datetimes and values
     """
-    df = get_dataframe()
-    result = ta.supertrend(
-        high=df["high"],
-        low=df["low"],
-        close=df["close"],
-        length=length,
-        multiplier=multiplier,
+    df = get_dataframe(ctx=ctx)
+    result = (
+        ta.supertrend(
+            high=df["high"],
+            low=df["low"],
+            close=df["close"],
+            length=length,
+            multiplier=multiplier,
+        )
+        .dropna()
+        .round(2)
     )
-
+    result.index = result.index.astype(str)
     return {
-        "trend": result[f"SUPERT_{length}_{multiplier}"].tolist(),
-        "direction": result[f"SUPERTd_{length}_{multiplier}"].tolist(),
-        "long": result[f"SUPERTl_{length}_{multiplier}"].tolist(),
-        "short": result[f"SUPERTs_{length}_{multiplier}"].tolist(),
-    }
-
-
-def calculate_psar(af: float = 0.02, max_af: float = 0.2) -> Dict[str, List[float]]:
-    """
-    Calculate Parabolic SAR (Stop and Reverse) trend indicator.
-
-    Provides entry/exit points. Dots below price suggest uptrend (buy),
-    dots above price suggest downtrend (sell).
-
-    Args:
-        af: Acceleration factor. Default 0.02
-        max_af: Maximum acceleration factor. Default 0.2
-
-    Returns:
-        Dict with 'psar', 'long', 'short', and 'af' (acceleration factor) keys
-    """
-    df = get_dataframe()
-    result = ta.psar(
-        high=df["high"], low=df["low"], close=df["close"], af0=af, af=af, max_af=max_af
-    )
-
-    return {
-        "psar": result[f"PSARl_{af}_{max_af}"]
-        .fillna(result[f"PSARs_{af}_{max_af}"])
-        .tolist(),
-        "long": result[f"PSARl_{af}_{max_af}"].tolist(),
-        "short": result[f"PSARs_{af}_{max_af}"].tolist(),
-        "af": result[f"PSARaf_{af}_{max_af}"].tolist(),
-    }
-
-
-def calculate_ichimoku(
-    tenkan: int = 9, kijun: int = 26, senkou: int = 52
-) -> Dict[str, List[float]]:
-    """
-    Calculate Ichimoku Cloud comprehensive trend indicator.
-
-    Provides support/resistance, trend direction, and momentum. Price above
-    cloud is bullish, below cloud is bearish. Cloud color indicates trend.
-
-    Args:
-        tenkan: Conversion line period. Default 9
-        kijun: Base line period. Default 26
-        senkou: Leading span B period. Default 52
-
-    Returns:
-        Dict with conversion line, base line, leading spans A/B, and lagging span
-    """
-    df = get_dataframe()
-    result = ta.ichimoku(
-        high=df["high"],
-        low=df["low"],
-        close=df["close"],
-        tenkan=tenkan,
-        kijun=kijun,
-        senkou=senkou,
-    )
-
-    return {
-        "conversion_line": result[0][f"ITS_{tenkan}"].tolist(),
-        "base_line": result[0][f"IKS_{kijun}"].tolist(),
-        "leading_span_a": result[0][f"ISA_{tenkan}"].tolist(),
-        "leading_span_b": result[0][f"ISB_{kijun}"].tolist(),
-        "lagging_span": result[0][f"ICS_{kijun}"].tolist(),
-    }
-
-
-def calculate_adx(length: int = 14) -> Dict[str, List[float]]:
-    """
-    Calculate ADX (Average Directional Index) trend strength indicator.
-
-    Measures strength of trend regardless of direction. Values above 25 indicate
-    strong trend, below 20 indicate weak trend or ranging market.
-
-    Args:
-        length: ADX period. Default 14
-
-    Returns:
-        Dict with 'adx', 'dmp' (+DI), and 'dmn' (-DI) keys
-    """
-    df = get_dataframe()
-    result = ta.adx(high=df["high"], low=df["low"], close=df["close"], length=length)
-
-    return {
-        "adx": result[f"ADX_{length}"].tolist(),
-        "dmp": result[f"DMP_{length}"].tolist(),  # +DI
-        "dmn": result[f"DMN_{length}"].tolist(),  # -DI
-    }
-
-
-def calculate_vortex(length: int = 14) -> Dict[str, List[float]]:
-    """
-    Calculate Vortex Indicator for trend direction and strength.
-
-    Returns +VI and -VI lines. When +VI crosses above -VI it's bullish,
-    when -VI crosses above +VI it's bearish. Good trend confirmation.
-
-    Args:
-        length: Lookback period. Default 14. Common values: 14, 21
-
-    Returns:
-        Dict with 'positive' (+VI) and 'negative' (-VI) keys
-    """
-    df = get_dataframe()
-    result = ta.vortex(high=df["high"], low=df["low"], close=df["close"], length=length)
-
-    return {
-        "positive": result[f"VTXP_{length}"].tolist(),
-        "negative": result[f"VTXM_{length}"].tolist(),
+        "trend": result[f"SUPERT_{length}_{multiplier}"].to_dict(),
+        "direction": result[f"SUPERTd_{length}_{multiplier}"].to_dict(),
+        "long": result[f"SUPERTl_{length}_{multiplier}"].to_dict(),
+        "short": result[f"SUPERTs_{length}_{multiplier}"].to_dict(),
     }
 
 
 # --- VOLATILITY INDICATORS ---
 
 
-def calculate_bollinger_bands(length: int = 20) -> Dict[str, List[float]]:
+def calculate_bollinger_bands(
+    ctx: RunContext[AgentsDeps], length: int = 20
+) -> Dict[Hashable, Any]:
     """
     Calculate Bollinger Bands volatility indicator.
 
@@ -390,20 +196,21 @@ def calculate_bollinger_bands(length: int = 20) -> Dict[str, List[float]]:
         length: Moving average period. Default 20
 
     Returns:
-        Dict with 'upper', 'middle', 'lower', and 'bandwidth' keys
+        Dict with 'upper', 'middle', 'lower', and 'bandwidth' keys containing corresponding pairs of datetimes and values
     """
-    df = get_dataframe()
-    result = ta.bbands(close=df["close"], length=length)
+    df = get_dataframe(ctx=ctx)
+    result = ta.bbands(close=df["close"], length=length).dropna().round(2)
+    result.index = result.index.astype(str)
 
     return {
-        "upper": result[f"BBU_{length}_2.0_2.0"].tolist(),
-        "middle": result[f"BBM_{length}_2.0_2.0"].tolist(),
-        "lower": result[f"BBL_{length}_2.0_2.0"].tolist(),
-        "bandwidth": result[f"BBB_{length}_2.0_2.0"].tolist(),
+        "upper": result[f"BBU_{length}_2.0_2.0"].to_dict(),
+        "middle": result[f"BBM_{length}_2.0_2.0"].to_dict(),
+        "lower": result[f"BBL_{length}_2.0_2.0"].to_dict(),
+        "bandwidth": result[f"BBB_{length}_2.0_2.0"].to_dict(),
     }
 
 
-def calculate_atr(length: int = 14) -> List[float]:
+def calculate_atr(ctx: RunContext[AgentsDeps], length: int = 14) -> dict[Hashable, Any]:
     """
     Calculate ATR (Average True Range) volatility indicator.
 
@@ -414,74 +221,25 @@ def calculate_atr(length: int = 14) -> List[float]:
         length: ATR period. Default 14
 
     Returns:
-        List of ATR values
+        Dict with ATR values and corresponding datetimes
     """
-    df = get_dataframe()
-    result = ta.atr(high=df["high"], low=df["low"], close=df["close"], length=length)
-    return result.tolist()
-
-
-def calculate_keltner_channel(
-    length: int = 20, multiplier: float = 2.0
-) -> Dict[str, List[float]]:
-    """
-    Calculate Keltner Channels volatility indicator.
-
-    Similar to Bollinger Bands but uses ATR. Returns upper, middle (EMA),
-    and lower channels. Good for breakout trading.
-
-    Args:
-        length: EMA period. Default 20
-        multiplier: ATR multiplier. Default 2.0. Common values: 1.5-2.5
-
-    Returns:
-        Dict with 'upper', 'middle', and 'lower' channel keys
-    """
-    df = get_dataframe()
-    result = ta.kc(
-        high=df["high"],
-        low=df["low"],
-        close=df["close"],
-        length=length,
-        scalar=multiplier,
+    df = get_dataframe(ctx=ctx)
+    result = (
+        ta.atr(high=df["high"], low=df["low"], close=df["close"], length=length)
+        .dropna()
+        .round(2)
     )
+    result.index = result.index.astype(str)
 
-    return {
-        "upper": result[f"KCUe_{length}_{multiplier}"].tolist(),
-        "middle": result[f"KCBe_{length}_{multiplier}"].tolist(),
-        "lower": result[f"KCLe_{length}_{multiplier}"].tolist(),
-    }
-
-
-def calculate_donchian_channel(length: int = 20) -> Dict[str, List[float]]:
-    """
-    Calculate Donchian Channels volatility/breakout indicator.
-
-    Shows highest high and lowest low over period. Breakouts above upper
-    channel are bullish, below lower channel are bearish.
-
-    Args:
-        length: Lookback period. Default 20. Common values: 20, 50, 100
-
-    Returns:
-        Dict with 'upper', 'middle', and 'lower' channel keys
-    """
-    df = get_dataframe()
-    result = ta.donchian(
-        high=df["high"], low=df["low"], lower_length=length, upper_length=length
-    )
-
-    return {
-        "upper": result[f"DCU_{length}_{length}"].tolist(),
-        "middle": result[f"DCM_{length}_{length}"].tolist(),
-        "lower": result[f"DCL_{length}_{length}"].tolist(),
-    }
+    return result.to_dict()
 
 
 # --- VOLUME INDICATORS ---
 
 
-def calculate_obv() -> List[float]:
+def calculate_obv(
+    ctx: RunContext[AgentsDeps],
+) -> dict[Any, Hashable]:
     """
     Calculate OBV (On-Balance Volume) momentum indicator.
 
@@ -489,14 +247,18 @@ def calculate_obv() -> List[float]:
     Rising OBV suggests accumulation, falling OBV suggests distribution.
 
     Returns:
-        List of OBV values
+        Dict of OBV values and datetimes
     """
-    df = get_dataframe()
-    result = ta.obv(close=df["close"], volume=df["volume"])
-    return result.tolist()
+    df = get_dataframe(ctx=ctx)
+    result = ta.obv(close=df["close"], volume=df["volume"]).dropna().round(2)
+    result.index = result.index.astype(str)
+
+    return result.to_dict()
 
 
-def calculate_vwap() -> List[float]:
+def calculate_vwap(
+    ctx: RunContext[AgentsDeps],
+) -> dict[Hashable, Any]:
     """
     Calculate VWAP (Volume Weighted Average Price).
 
@@ -504,34 +266,67 @@ def calculate_vwap() -> List[float]:
     institutional trading levels. Price above VWAP is bullish, below is bearish.
 
     Returns:
-        List of VWAP values
+        Dict of VWAP values with datetimes
     """
-    df = get_dataframe()
-    result = ta.vwap(
-        high=df["high"], low=df["low"], close=df["close"], volume=df["volume"]
+    df = get_dataframe(ctx=ctx)
+    result = (
+        ta.vwap(high=df["high"], low=df["low"], close=df["close"], volume=df["volume"])
+        .dropna()
+        .round(2)
     )
-    return result.tolist()
+    result.index = result.index.astype(str)
+    return result.to_dict()
 
 
-def calculate_cmf(length: int = 20) -> List[float]:
+# --- CANDLE PATTERN INDICATORS ---
+
+
+def calculate_cdl_pattern(
+    ctx: RunContext[AgentsDeps],
+) -> str:
     """
-    Calculate Chaikin Money Flow volume indicator.
+    Detect candlestick patterns in the price data.
 
-    Measures buying/selling pressure. Values above 0 indicate accumulation,
-    below 0 indicate distribution. Strong signals above +0.25 or below -0.25.
-
-    Args:
-        length: Lookback period. Default 20
+    Analyzes OHLC (Open, High, Low, Close) data to identify common
+    candlestick patterns like doji, hammer, engulfing patterns, etc.
+    Returns a formatted string describing detected patterns with their
+    timestamps and signal direction (bullish- ↑/bearish - ↓).
 
     Returns:
-        List of CMF values (range: -1 to 1)
+        Formatted string describing detected candlestick patterns.
+        Returns "No candlestick patterns detected." if none found.
     """
-    df = get_dataframe()
-    result = ta.cmf(
+    df = get_dataframe(ctx=ctx)
+    res = ta.cdl_pattern(
+        open_=df["open"], high=df["high"], low=df["low"], close=df["close"]
+    )
+    res = res.loc[:, (res != 0).any()]
+    patterns_df = res[(res != 0).any(axis=1)]
+    # If no patterns detected
+    if patterns_df.empty:
+        return "No candlestick patterns detected in the analyzed period."
+    result_lines = ["Candlestick Patterns Detected:\n"]
+
+    for timestamp, row in patterns_df.iterrows():
+        patterns_found = []
+        for pattern_name, value in row.items():
+            if value != 0:
+                clean_name = pattern_name.replace("CDL_", "").replace("_", " ").title()  # pyright: ignore[reportAttributeAccessIssue]
+                signal = "↑" if value > 0 else "↓"
+                patterns_found.append(f"{clean_name} {signal}")
+
+        if patterns_found:
+            result_lines.append(f"{timestamp}: {', '.join(patterns_found)}")
+
+    return "\n".join(result_lines)
+
+
+if __name__ == "__main__":
+    df = pd.read_csv("logs/pics/btc_tmp.csv", parse_dates=True, index_col="timestamp")
+    result = ta.stoch(
         high=df["high"],
         low=df["low"],
         close=df["close"],
-        volume=df["volume"],
-        length=length,
     )
-    return result.tolist()
+
+    print(result)
