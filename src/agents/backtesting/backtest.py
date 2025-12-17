@@ -14,7 +14,7 @@ def get_first_index_safely(indexes):
     return indexes[0] if len(indexes) > 0 else None
 
 
-def run_test(test_name: str, num_tests: int = 1):
+def run_test_tech_analyst(test_name: str, num_tests: int = 1):
     """
     Func to run the testing of the new agentic system
     test_name - MUST BE UNIQUE!
@@ -126,6 +126,8 @@ def analyze_test(path: Path):
 
 
 if __name__ == "__main__":
-    res, path_saved = run_test(num_tests=30, test_name="ind_better_output")
+    res, path_saved = run_test_tech_analyst(
+        num_tests=30, test_name="shorter_system_prompt"
+    )
     analyze_test(path_saved)
     print(res)
