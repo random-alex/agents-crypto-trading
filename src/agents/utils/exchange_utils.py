@@ -20,10 +20,12 @@ def get_coin_prices(
     start_date: int | None = None,
     end_date: int | None = None,
     sampling_freq: str = Config.SAMPLING_FREQ,
+    days_delay: int = 1,
+    **kwargs,
 ):
     if not start_date:
         start_date = int(
-            (datetime.now(timezone.utc) - timedelta(days=1)).timestamp() * 1000
+            (datetime.now(timezone.utc) - timedelta(days=days_delay)).timestamp() * 1000
         )
     if not end_date:
         end_date = int(datetime.now(timezone.utc).timestamp() * 1000)

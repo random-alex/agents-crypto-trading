@@ -13,6 +13,22 @@ class TechOutput(BaseModel):
     risk_reward_ratio: str
     timeframe_alignment: bool
 
+    def to_readable_string(self) -> str:
+        """Convert to human-readable string format"""
+        return f"""
+    Decision: {self.decision}
+    Confidence: {self.confidence}
+
+    REASONING:
+    {"*".join(self.key_signals)}
+
+
+    SIGNAL:
+    Entry: ${self.entry}
+    Take Profit 1: ${self.take_profit}
+    Stop Loss: ${self.stop_loss}
+    Risk/Reward: {self.risk_reward_ratio}"""
+
 
 class AgentsDeps(BaseModel):
     df_candle_path: Path
